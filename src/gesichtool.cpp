@@ -1,3 +1,4 @@
+#include <optional>
 #include <cstdlib>
 #include <filesystem>
 #include <future>
@@ -9,12 +10,16 @@
 #include <opencv2/opencv.hpp>
 
 void detect_and_extract_faces(cv::CascadeClassifier face_cascade,
-                           int image_idx, cv::Mat image,
-                           int min_neighbors,
-                           std::filesystem::path output_directory)
+                              int image_idx, cv::Mat image,
+                              std::optional<cv::Size> min_size,
+                              std::optional<cv::Size> max_size,
+                              int min_neighbors,
+                              std::filesystem::path output_directory)
 {
   std::vector<cv::Rect> faces;
-  face_cascade.detectMultiScale(image, faces, 1.1, min_neighbors, 0, cv::Size(512, 512), cv::Size());
+  face_cascade.detectMultiScale(image, faces, 1.1, min_neighbors, 0,
+                                min_size.value_or(cv::Size()),
+                                max_size.value_or(cv::Size()));
 
   fmt::print("  detected {}\n", faces.size());
 
@@ -60,6 +65,8 @@ struct Options
 {
   std::vector<std::filesystem::path> images = {};
   std::filesystem::path output_directory = {};
+  std::optional<cv::Size> min_size = cv::Size(512, 512);
+  std::optional<cv::Size> max_size = {};
   bool verbose = false;
   int min_neighbors = 3;
 };
@@ -83,6 +90,15 @@ void print_help()
     "  -o, --output DIR          Output directory\n"
     "  -n, --min-neighbors INT   Higher values reduce false positives (default: 3)\n"
     );
+}
+
+cv::Size to_size(std::string const& text)
+{
+  cv::Size size;
+  if (sscanf(text.c_str(), "%dx%d", &size.width, &size.height) != 2) {
+    throw std::runtime_error(fmt::format("failed to read cv::Size from {}", text));
+  }
+  return size;
 }
 
 Options parse_args(std::vector<std::string> const& argv)
@@ -109,7 +125,7 @@ Options parse_args(std::vector<std::string> const& argv)
         print_help();
         exit(EXIT_SUCCESS);
       }
-      else if (arg == "-n" || arg == "--min_neighbors") {
+      else if (arg == "-n" || arg == "--min-neighbors") {
         argv_idx += 1;
         if (argv_idx >= argv.size()) {
           throw ArgParseError(fmt::format("{} requires an argument", arg));
@@ -120,7 +136,24 @@ Options parse_args(std::vector<std::string> const& argv)
         } catch (std::exception const& err) {
           std::throw_with_nested(ArgParseError(fmt::format("invalid value {} for argument", argv[argv_idx], arg)));
         }
-      } else {
+      }
+      else if (arg == "--min-size") {
+        argv_idx += 1;
+        if (argv_idx >= argv.size()) {
+          throw ArgParseError(fmt::format("{} requires an argument", arg));
+        }
+
+        opts.min_size = to_size(argv[argv_idx]);
+      }
+      else if (arg == "--max-size") {
+        argv_idx += 1;
+        if (argv_idx >= argv.size()) {
+          throw ArgParseError(fmt::format("{} requires an argument", arg));
+        }
+
+        opts.max_size = to_size(argv[argv_idx]);
+      }
+      else {
         throw ArgParseError(fmt::format("unknown argument {} given", arg));
       }
     }
@@ -168,8 +201,10 @@ void run(Options const& opts)
         fmt::print(stderr, "error: failed to read image: {}\n", input_image_path);
       } else {
         detect_and_extract_faces(face_cascade, images_idx, std::move(image),
-                              opts.min_neighbors,
-                              opts.output_directory);
+                                 opts.min_size,
+                                 opts.max_size,
+                                 opts.min_neighbors,
+                                 opts.output_directory);
       }
     }));
   }
