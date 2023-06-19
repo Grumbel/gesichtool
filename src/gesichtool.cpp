@@ -17,7 +17,8 @@ void detect_and_extract_faces(cv::CascadeClassifier& face_cascade,
                               std::optional<cv::Size> min_size,
                               std::optional<cv::Size> max_size,
                               int min_neighbors,
-                              std::filesystem::path output_directory)
+                              std::filesystem::path output_directory,
+                              cv::Size output_size)
 {
   std::vector<cv::Rect> faces;
   face_cascade.detectMultiScale(image, faces, 1.1, min_neighbors, 0,
@@ -56,7 +57,7 @@ void detect_and_extract_faces(cv::CascadeClassifier& face_cascade,
 
     std::string const filename = output_directory / fmt::format("face{:03d}-{:03d}.jpg", image_idx, face_idx);
 
-    cv::resize(face_image, face_image, cv::Size(512, 512));
+    cv::resize(face_image, face_image, output_size);
 
     cv::imwrite(filename, face_image);
 
@@ -68,6 +69,7 @@ struct Options
 {
   std::vector<std::filesystem::path> images = {};
   std::filesystem::path output_directory = {};
+  cv::Size output_size = cv::Size(512, 512);
   std::optional<cv::Size> min_size = cv::Size(512, 512);
   std::optional<cv::Size> max_size = {};
   bool verbose = false;
@@ -87,11 +89,18 @@ void print_help()
     "Usage: gesichtool [OPTIONS] IMAGE... -o OUTDIR\n"
     "Extract faces from image files\n"
     "\n"
-    "Options:\n"
+    "General Options:\n"
     "  -h, --help                Print this help\n"
     "  -v, --verbose             Be more verbose\n"
-    "  -o, --output DIR          Output directory\n"
+    "\n"
+    "Face Detect Options:\n"
     "  -n, --min-neighbors INT   Higher values reduce false positives (default: 3)\n"
+    "  --min-size WxH            Minimum sizes for detected faces\n"
+    "  --max-size WxH            Maximum sizes for detected faces\n"
+    "\n"
+    "Output Options:\n"
+    "  -o, --output DIR          Output directory\n"
+    "  --size WxH         Rescale output images to WxH (default: 512x512)\n"
     );
 }
 
@@ -156,6 +165,14 @@ Options parse_args(std::vector<std::string> const& argv)
 
         opts.max_size = to_size(argv[argv_idx]);
       }
+      else if (arg == "--size") {
+        argv_idx += 1;
+        if (argv_idx >= argv.size()) {
+          throw ArgParseError(fmt::format("{} requires an argument", arg));
+        }
+
+        opts.output_size = to_size(argv[argv_idx]);
+      }
       else {
         throw ArgParseError(fmt::format("unknown argument {} given", arg));
       }
@@ -210,7 +227,8 @@ void run(Options const& opts)
                                  opts.min_size,
                                  opts.max_size,
                                  opts.min_neighbors,
-                                 opts.output_directory);
+                                 opts.output_directory,
+                                 opts.output_size);
       }
     }));
   }
