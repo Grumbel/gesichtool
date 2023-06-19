@@ -4,12 +4,15 @@
 #include <future>
 #include <string>
 #include <vector>
+#include <semaphore>
 
 #include <fmt/format.h>
 #include <fmt/std.h>
 #include <opencv2/opencv.hpp>
 
-void detect_and_extract_faces(cv::CascadeClassifier face_cascade,
+#include "semaphore_guard.hpp"
+
+void detect_and_extract_faces(cv::CascadeClassifier& face_cascade,
                               int image_idx, cv::Mat image,
                               std::optional<cv::Size> min_size,
                               std::optional<cv::Size> max_size,
@@ -180,6 +183,7 @@ void run(Options const& opts)
 
   std::string const cascade_file = cv::samples::findFile("haarcascades/haarcascade_frontalface_default.xml");
 
+  std::counting_semaphore sem(std::thread::hardware_concurrency());
   std::vector<std::future<void>> futures;
   for (size_t images_idx = 0; images_idx < opts.images.size(); ++images_idx)
   {
@@ -189,7 +193,9 @@ void run(Options const& opts)
       fmt::print("processing {}\n", input_image_path);
     }
 
-    futures.push_back(std::async(std::launch::async, [images_idx, &input_image_path, &opts, &cascade_file]{
+    futures.push_back(std::async(std::launch::async, [&sem, images_idx, &input_image_path, &opts, &cascade_file]{
+      SemaphoreGuard guard(sem);
+
       // CascadeClassifier is neither thread safe nor can it be copied
       cv::CascadeClassifier face_cascade;
       if (!face_cascade.load(cascade_file)) {
