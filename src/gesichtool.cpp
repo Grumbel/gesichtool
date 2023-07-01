@@ -92,6 +92,7 @@ struct Options
   std::optional<cv::Size> max_size = {};
   bool verbose = false;
   int min_neighbors = 3;
+  double threshold = 0.0;
 };
 
 class ArgParseError : public std::runtime_error
@@ -114,10 +115,14 @@ void print_help()
     "Face Detect Mode:\n"
     "  --dlib                    Use dlib face detection (default)\n"
     "  --opencv                  Use OpenCV face detection\n"
-    "Face Detect Options:\n"
+    "\n"
+    "OpenCV Face Detect Options:\n"
     "  -n, --min-neighbors INT   Higher values reduce false positives (default: 3)\n"
     "  --min-size WxH            Minimum sizes for detected faces\n"
     "  --max-size WxH            Maximum sizes for detected faces\n"
+    "\n"
+    "dlib Face Detect Options:\n"
+    "  --threshold FLOAT         Detection threshold (default: 0.0)\n"
     "\n"
     "Output Options:\n"
     "  -o, --output DIR          Output directory\n"
@@ -186,6 +191,14 @@ Options parse_args(std::vector<std::string> const& argv)
 
         opts.max_size = to_size(argv[argv_idx]);
       }
+      else if (arg == "--threshold") {
+        argv_idx += 1;
+        if (argv_idx >= argv.size()) {
+          throw ArgParseError(fmt::format("{} requires an argument", arg));
+        }
+
+        opts.threshold = std::stod(argv[argv_idx]);
+      }
       else if (arg == "--size") {
         argv_idx += 1;
         if (argv_idx >= argv.size()) {
@@ -247,7 +260,7 @@ void run_dlib(Options const& opts)
 
       dlib::cv_image<unsigned char> const dlibImage(gray);
 
-      std::vector<dlib::rectangle> const dlib_faces = detector(dlibImage);
+      std::vector<dlib::rectangle> const dlib_faces = detector(dlibImage, opts.threshold);
 
       std::vector<cv::Rect> faces;
       for (auto const& rect : dlib_faces)
