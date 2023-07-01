@@ -14,13 +14,13 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-#include <optional>
 #include <cstdlib>
 #include <filesystem>
 #include <future>
+#include <optional>
+#include <semaphore>
 #include <string>
 #include <vector>
-#include <semaphore>
 
 #include <dlib/image_processing/frontal_face_detector.h>
 #include <dlib/opencv.h>
@@ -30,19 +30,7 @@
 
 #include "semaphore_guard.hpp"
 
-std::vector<cv::Rect> detect_faces(cv::CascadeClassifier& face_cascade,
-                                   cv::Mat const& image,
-                                   std::optional<cv::Size> min_size,
-                                   std::optional<cv::Size> max_size,
-                                   int min_neighbors)
-{
-  std::vector<cv::Rect> faces;
-  face_cascade.detectMultiScale(image, faces, 1.1, min_neighbors, 0,
-                                min_size.value_or(cv::Size()),
-                                max_size.value_or(cv::Size()));
-
-  return faces;
-}
+namespace gesichtool {
 
 void extract_faces(cv::Mat const& image, std::vector<cv::Rect> const& faces,
                    int image_idx,
@@ -312,10 +300,11 @@ void run_opencv(Options const& opts)
       if (image.empty()) {
         fmt::print(stderr, "error: failed to read image: {}\n", input_image_path);
       } else {
-        std::vector<cv::Rect> faces = detect_faces(face_cascade, image,
-                                                   opts.min_size,
-                                                   opts.max_size,
-                                                   opts.min_neighbors);
+        std::vector<cv::Rect> faces;
+        face_cascade.detectMultiScale(image, faces, 1.1, opts.min_neighbors, 0,
+                                      opts.min_size.value_or(cv::Size()),
+                                      opts.max_size.value_or(cv::Size()));
+
         extract_faces(image, faces,
                       images_idx,
                       opts.output_directory,
@@ -357,10 +346,18 @@ int main(int argc, char* argv[])
 
     run(opts);
 
-    return 0;
+    return EXIT_SUCCESS;
   } catch (std::exception const& err) {
     fmt::print(stderr, "error: {}\n", err.what());
+    return EXIT_FAILURE;
   }
+}
+
+} // namespace gesichtool
+
+int main(int argc, char* argv[])
+{
+  gesichtool::main(argc, argv);
 }
 
 /* EOF */
