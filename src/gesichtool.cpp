@@ -76,7 +76,7 @@ void extract_faces(cv::Mat const& image, std::vector<cv::Rect> const& faces,
                enlarged_face.height,
                image.cols, image.rows);
 
-    cv::Mat const face_image = image(enlarged_face);
+    cv::Mat face_image = image(enlarged_face);
 
     std::string const filename = output_directory / fmt::format("face{:03d}-{:03d}.jpg", image_idx, face_idx);
 
