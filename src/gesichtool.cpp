@@ -96,7 +96,7 @@ enum class Mode
 
 struct Options
 {
-  Mode mode;
+  Mode mode = Mode::DLIB;
   std::vector<std::filesystem::path> images = {};
   std::filesystem::path output_directory = {};
   cv::Size output_size = cv::Size(512, 512);
@@ -124,7 +124,7 @@ void print_help()
     "  -v, --verbose             Be more verbose\n"
     "\n"
     "Face Detect Mode:\n"
-    "  --dlib                    Use dlib face detection\n"
+    "  --dlib                    Use dlib face detection (default)\n"
     "  --opencv                  Use OpenCV face detection\n"
     "Face Detect Options:\n"
     "  -n, --min-neighbors INT   Higher values reduce false positives (default: 3)\n"
