@@ -27,6 +27,8 @@
               fmt
               opencv4
               dlib
+              libpng
+              libjpeg
             ];
           };
         };
