@@ -22,27 +22,33 @@
 #include <vector>
 #include <semaphore>
 
+#include <dlib/image_processing/frontal_face_detector.h>
+#include <dlib/opencv.h>
 #include <fmt/format.h>
 #include <fmt/std.h>
 #include <opencv2/opencv.hpp>
 
 #include "semaphore_guard.hpp"
 
-void detect_and_extract_faces(cv::CascadeClassifier& face_cascade,
-                              int image_idx, cv::Mat image,
-                              std::optional<cv::Size> min_size,
-                              std::optional<cv::Size> max_size,
-                              int min_neighbors,
-                              std::filesystem::path output_directory,
-                              cv::Size output_size)
+std::vector<cv::Rect> detect_faces(cv::CascadeClassifier& face_cascade,
+                                   cv::Mat const& image,
+                                   std::optional<cv::Size> min_size,
+                                   std::optional<cv::Size> max_size,
+                                   int min_neighbors)
 {
   std::vector<cv::Rect> faces;
   face_cascade.detectMultiScale(image, faces, 1.1, min_neighbors, 0,
                                 min_size.value_or(cv::Size()),
                                 max_size.value_or(cv::Size()));
 
-  fmt::print("  detected {}\n", faces.size());
+  return faces;
+}
 
+void extract_faces(cv::Mat const& image, std::vector<cv::Rect> const& faces,
+                   int image_idx,
+                   std::filesystem::path const& output_directory,
+                   cv::Size const& output_size)
+{
   int face_idx = 0;
   for (cv::Rect const& face : faces)
   {
@@ -63,13 +69,14 @@ void detect_and_extract_faces(cv::CascadeClassifier& face_cascade,
       enlarged_face = face;
     }
 
-    fmt::print("extracting face at: {} {} {} {}\n",
+    fmt::print("extracting face at: {} {} {} {} from {}x{}\n",
                enlarged_face.x,
                enlarged_face.y,
                enlarged_face.width,
-               enlarged_face.height);
+               enlarged_face.height,
+               image.cols, image.rows);
 
-    cv::Mat face_image = image(enlarged_face);
+    cv::Mat const face_image = image(enlarged_face);
 
     std::string const filename = output_directory / fmt::format("face{:03d}-{:03d}.jpg", image_idx, face_idx);
 
@@ -81,8 +88,15 @@ void detect_and_extract_faces(cv::CascadeClassifier& face_cascade,
   }
 }
 
+enum class Mode
+{
+  DLIB,
+  OPENCV
+};
+
 struct Options
 {
+  Mode mode;
   std::vector<std::filesystem::path> images = {};
   std::filesystem::path output_directory = {};
   cv::Size output_size = cv::Size(512, 512);
@@ -109,6 +123,9 @@ void print_help()
     "  -h, --help                Print this help\n"
     "  -v, --verbose             Be more verbose\n"
     "\n"
+    "Face Detect Mode:\n"
+    "  --dlib                    Use dlib face detection\n"
+    "  --opencv                  Use OpenCV face detection\n"
     "Face Detect Options:\n"
     "  -n, --min-neighbors INT   Higher values reduce false positives (default: 3)\n"
     "  --min-size WxH            Minimum sizes for detected faces\n"
@@ -189,6 +206,12 @@ Options parse_args(std::vector<std::string> const& argv)
 
         opts.output_size = to_size(argv[argv_idx]);
       }
+      else if (arg == "--opencv") {
+        opts.mode = Mode::OPENCV;
+      }
+      else if (arg == "--dlib") {
+        opts.mode = Mode::DLIB;
+      }
       else {
         throw ArgParseError(fmt::format("unknown argument {} given", arg));
       }
@@ -210,9 +233,48 @@ Options parse_args(std::vector<std::string> const& argv)
   return opts;
 }
 
-void run(Options const& opts)
+void run_dlib(Options const& opts)
 {
-  std::filesystem::create_directory(opts.output_directory);
+  fmt::print("running dlib face detection\n");
+
+  // not thread safe
+  dlib::frontal_face_detector detector = dlib::get_frontal_face_detector();
+
+  for (size_t images_idx = 0; images_idx < opts.images.size(); ++images_idx)
+  {
+    std::filesystem::path const& input_image_path = opts.images[images_idx];
+
+    if (opts.verbose) {
+      fmt::print("processing {}\n", input_image_path);
+    }
+
+    cv::Mat const image = cv::imread(input_image_path);
+    cv::Mat gray;
+    cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
+
+    dlib::cv_image<unsigned char> const dlibImage(gray);
+
+    std::vector<dlib::rectangle> const dlib_faces = detector(dlibImage);
+
+    std::vector<cv::Rect> faces;
+    for (auto const& rect : dlib_faces)
+    {
+      faces.emplace_back(static_cast<int>(rect.left()),
+                         static_cast<int>(rect.top()),
+                         static_cast<int>(rect.width()),
+                         static_cast<int>(rect.height()));
+    }
+
+    extract_faces(image, faces,
+                  images_idx,
+                  opts.output_directory,
+                  opts.output_size);
+  }
+}
+
+void run_opencv(Options const& opts)
+{
+  fmt::print("running OpenCV face detection\n");
 
   std::string const cascade_file = cv::samples::findFile("haarcascades/haarcascade_frontalface_default.xml");
 
@@ -239,12 +301,16 @@ void run(Options const& opts)
       if (image.empty()) {
         fmt::print(stderr, "error: failed to read image: {}\n", input_image_path);
       } else {
-        detect_and_extract_faces(face_cascade, images_idx, std::move(image),
-                                 opts.min_size,
-                                 opts.max_size,
-                                 opts.min_neighbors,
-                                 opts.output_directory,
-                                 opts.output_size);
+        std::vector<cv::Rect> faces = detect_faces(face_cascade, image,
+                                                   opts.min_size,
+                                                   opts.max_size,
+                                                   opts.min_neighbors);
+        extract_faces(image, faces,
+                      images_idx,
+                      opts.output_directory,
+                      opts.output_size);
+
+        fmt::print("  detected {}\n", faces.size());
       }
     }));
   }
@@ -252,6 +318,22 @@ void run(Options const& opts)
   fmt::print("waiting for results\n");
   for (auto& future : futures) {
     future.get();
+  }
+}
+
+void run(Options const& opts)
+{
+  std::filesystem::create_directory(opts.output_directory);
+
+  switch (opts.mode)
+  {
+    case Mode::OPENCV:
+      run_opencv(opts);
+      break;
+
+    case Mode::DLIB:
+      run_dlib(opts);
+      break;
   }
 }
 

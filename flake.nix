@@ -26,6 +26,7 @@
             buildInputs = with pkgs; [
               fmt
               opencv4
+              dlib
             ];
           };
         };
