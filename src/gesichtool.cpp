@@ -237,38 +237,49 @@ void run_dlib(Options const& opts)
 {
   fmt::print("running dlib face detection\n");
 
-  // not thread safe
-  dlib::frontal_face_detector detector = dlib::get_frontal_face_detector();
-
+  std::counting_semaphore sem(std::thread::hardware_concurrency());
+  std::vector<std::future<void>> futures;
   for (size_t images_idx = 0; images_idx < opts.images.size(); ++images_idx)
   {
-    std::filesystem::path const& input_image_path = opts.images[images_idx];
+    futures.push_back(std::async(std::launch::async, [&sem, images_idx, &opts]{
+      SemaphoreGuard guard(sem);
 
-    if (opts.verbose) {
-      fmt::print("processing {}\n", input_image_path);
-    }
+      std::filesystem::path const& input_image_path = opts.images[images_idx];
 
-    cv::Mat const image = cv::imread(input_image_path);
-    cv::Mat gray;
-    cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
+      if (opts.verbose) {
+        fmt::print("processing {}\n", input_image_path);
+      }
 
-    dlib::cv_image<unsigned char> const dlibImage(gray);
+      // not thread safe, so recreate it each thread
+      dlib::frontal_face_detector detector = dlib::get_frontal_face_detector();
 
-    std::vector<dlib::rectangle> const dlib_faces = detector(dlibImage);
+      cv::Mat const image = cv::imread(input_image_path);
+      cv::Mat gray;
+      cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
 
-    std::vector<cv::Rect> faces;
-    for (auto const& rect : dlib_faces)
-    {
-      faces.emplace_back(static_cast<int>(rect.left()),
-                         static_cast<int>(rect.top()),
-                         static_cast<int>(rect.width()),
-                         static_cast<int>(rect.height()));
-    }
+      dlib::cv_image<unsigned char> const dlibImage(gray);
 
-    extract_faces(image, faces,
-                  images_idx,
-                  opts.output_directory,
-                  opts.output_size);
+      std::vector<dlib::rectangle> const dlib_faces = detector(dlibImage);
+
+      std::vector<cv::Rect> faces;
+      for (auto const& rect : dlib_faces)
+      {
+        faces.emplace_back(static_cast<int>(rect.left()),
+                           static_cast<int>(rect.top()),
+                           static_cast<int>(rect.width()),
+                           static_cast<int>(rect.height()));
+      }
+
+      extract_faces(image, faces,
+                    images_idx,
+                    opts.output_directory,
+                    opts.output_size);
+    }));
+  }
+
+  fmt::print("waiting for results\n");
+  for (auto& future : futures) {
+    future.get();
   }
 }
 
